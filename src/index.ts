@@ -21,6 +21,7 @@ import {
 import { toggleCalloutScrollLimit } from "./features/callout_scroll_limit";
 import { ensureCalloutTitleEditable, guardTitleEvents, handleTitleCompositionEnd, handleTitleCompositionStart, handleTitleFocusIn, handleTitleFocusOut, handleTitleInput, handleTitleKeydown, hideProtyleToolbarForTitle, preventTitleToolbarRender, preventTitleToolbarShortcut, selectCalloutTitleText } from "./features/title_edit";
 import { CompletionSession, handleCompletionCompositionEnd, handleCompletionCompositionStart, handleCompletionInput, handleCompletionKeydown, handleCompletionMousedown, handleSelectionChange, hideCompletionMenu } from "./features/completion_menu";
+import { scanMarkerQuotes } from "./features/marker_convert";
 import { CalloutTypeItem } from "./utils/callout_types";
 import { CalloutEnhanceSettings, createDefaultCalloutSettings, getResolvedCalloutTypes, isDefaultAppearancePreset, normalizeCalloutSettings, prepareCalloutSettings, SETTINGS_SCHEMA_VERSION } from "./utils/settings";
 import { getCalloutHeaderHitAreas, isFoldButtonHit, type CalloutHeaderHitAreas } from "./utils/callout_header_hit";
@@ -756,11 +757,15 @@ export default class CalloutEnhancePlugin extends Plugin {
             for (const mutation of mutations) {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === 1) {
-                        if ((node as HTMLElement).classList.contains("callout")) {
-                            this.initCallout(node as HTMLElement);
-                        } else {
-                            (node as HTMLElement).querySelectorAll?.(".callout").forEach((item) => this.initCallout(item as HTMLElement));
+                        const el = node as HTMLElement;
+                        if (el.classList.contains("callout")) {
+                            this.initCallout(el);
                         }
+                        // Init nested callouts too: a subtree added as one node whose root
+                        // is itself a callout would otherwise skip inner callouts.
+                        el.querySelectorAll?.('.callout[data-type="NodeCallout"]').forEach((item) => this.initCallout(item as HTMLElement));
+                        // Detect existing `[!type]` marker text in newly rendered blockquotes.
+                        scanMarkerQuotes(el);
                     }
                 });
             }
@@ -771,6 +776,8 @@ export default class CalloutEnhancePlugin extends Plugin {
     onLayoutReady() {
         this.scanAllCallouts();
         this.updateDynamicCalloutStyles();
+        // Convert pre-existing `[!type]` text markers already present in open docs.
+        scanMarkerQuotes(document);
     }
 
     openSetting() {

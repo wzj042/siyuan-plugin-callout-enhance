@@ -9,3 +9,4 @@ dist
 tmp
 .env
 .generate-callout-defaults-run.cjs
+.backup-running/
