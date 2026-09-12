@@ -365,9 +365,9 @@
         content: none;
     }
 
-    /* 非编辑态（callout 未获得焦点）隐藏占位空行，单行 callout 保持单行外观；
-       进入编辑（标题/正文获得焦点）后占位行恢复，便于点入正文。 */
-    &[data-callout-empty="true"]:not(:focus-within)>.callout-content>[data-type] {
+    /* 非编辑态隐藏占位空行，单行 callout 保持单行外观；进入编辑（:focus-within
+       或选区落入的 callout-enhance-editing）后恢复，便于点入正文。 */
+    &[data-callout-empty="true"]:not(:focus-within):not(.callout-enhance-editing)>.callout-content>[data-type] {
         display: none;
     }
 

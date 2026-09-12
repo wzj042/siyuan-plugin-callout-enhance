@@ -1,9 +1,9 @@
 import { Plugin, IOperation, showMessage } from "siyuan";
 import "./index.scss";
 import { closestTitleFromTarget, focusNewBlockEditableStart, getCalloutFromEventTarget, getSelectionCallout, placeCaretAtEnd } from "./utils/dom";
-import { cleanCalloutOuterHTML, getCalloutBodyContainer, getCalloutBodyLineCount, hasCalloutBody, isCalloutFoldButtonHidden, isCalloutSettingsPreview, refreshCalloutEmptyState } from "./utils/callout";
+import { cleanCalloutOuterHTML, ensureEmptyBodyPlaceholderForCallout, getCalloutBodyContainer, getCalloutBodyLineCount, hasCalloutBody, isCalloutFoldButtonHidden, isCalloutSettingsPreview, refreshCalloutEmptyState } from "./utils/callout";
 import { getParentBlockLikeSiyuan, shouldFocusCalloutTitleOnBodyArrowLeft } from "./utils/getBlock";
-import { createTransaction, getCurrentProtyle } from "./core/api";
+import { createTransaction, getCurrentProtyle, getNewNodeId } from "./core/api";
 import {
     countCalloutsBySubtypes,
     countCalloutsForTypeItem,
@@ -75,6 +75,7 @@ export default class CalloutEnhancePlugin extends Plugin {
     private appearancePreviewLayout: CalloutLayoutSettings | null = null;
 
     private observer: MutationObserver | null = null;
+    private lastEditingEmptyCallout: HTMLElement | null = null;
     isComposing = false;
     private titleBoundEls = new WeakSet<HTMLElement>();
     titleEnterInFlight = new Set<string>();
@@ -591,6 +592,51 @@ export default class CalloutEnhancePlugin extends Plugin {
         e.stopPropagation();
     };
 
+    /**
+     * 单行 callout 的占位空行在非编辑态隐藏后，正文区/块内边距没有可见点击目标。
+     * 点击这些区域（避开标题、类型菜单热区）时聚焦占位段落，恢复「点入正文」能力。
+     */
+    private handleEmptyCalloutBodyMouseDown = (e: MouseEvent) => {
+        if (isPublishService() || isWorkspaceReadOnly() || isEditorReadOnly()) return;
+        if (e.button !== 0) return;
+        const target = e.target as HTMLElement | null;
+        const callout = target?.closest?.('.callout[data-type="NodeCallout"]') as HTMLElement | null;
+        if (!callout || isCalloutSettingsPreview(callout)) return;
+        if (!callout.dataset.calloutEmpty || callout.getAttribute("fold")) return;
+        if (target.closest(".callout-title")) return;
+        const pointerHit = this.readCalloutPointerHit(callout, e);
+        const { clickX, clickY, hit } = pointerHit;
+        if (clickX >= hit.typeMenuLeft && clickX <= hit.typeMenuRight && clickY <= hit.firstLineBandBottom) return;
+        const contentEl = getCalloutBodyContainer(callout);
+        ensureEmptyBodyPlaceholderForCallout(callout, getNewNodeId);
+        const bodyBlock = Array.from(contentEl.children).find(
+            (child) => !(child as HTMLElement).classList?.contains("protyle-attr"),
+        ) as HTMLElement | undefined;
+        if (!bodyBlock) return;
+        e.preventDefault();
+        e.stopPropagation();
+        // 占位段由 callout-enhance-editing（选区驱动，见 updateEmptyCalloutEditingState）
+        // 在选区落入 callout 后恢复显示；这里只负责把选区放进占位段。
+        focusNewBlockEditableStart(bodyBlock);
+    };
+
+    /**
+     * 用选区（而非 DOM focus）驱动单行 callout 的「编辑态」标记：
+     * protyle 实际编辑焦点停留在编辑器容器上，:focus-within 不可靠；
+     * 选区落入空的 callout 时显示占位空行，离开即恢复单行外观。
+     */
+    private updateEmptyCalloutEditingState = () => {
+        const callout = getSelectionCallout();
+        const editing = callout && callout.dataset.calloutEmpty ? callout : null;
+        if (this.lastEditingEmptyCallout && this.lastEditingEmptyCallout !== editing) {
+            this.lastEditingEmptyCallout.classList.remove("callout-enhance-editing");
+        }
+        if (editing && !editing.classList.contains("callout-enhance-editing")) {
+            editing.classList.add("callout-enhance-editing");
+        }
+        this.lastEditingEmptyCallout = editing;
+    };
+
     private handleGlobalClick = (e: MouseEvent) => {
         if (this.calloutTypeMenuElement && !this.calloutTypeMenuElement.contains(e.target as Node)) {
             hideCalloutTypeMenu(this);
@@ -736,6 +782,7 @@ export default class CalloutEnhancePlugin extends Plugin {
             this.listen(document, "keyup", (e) => preventTitleToolbarRender(e, this), true);
             this.listen(document, "mouseup", (e) => preventTitleToolbarRender(e, this), true);
             this.listen(document, "selectionchange", () => hideProtyleToolbarForTitle(document.activeElement, this), true);
+            this.listen(document, "selectionchange", this.updateEmptyCalloutEditingState, true);
             this.listen(document, "beforeinput", (e) => guardTitleEvents(this, e), true);
             this.listen(document, "paste", (e) => guardTitleEvents(this, e), true);
             this.listen(document, "input", (e) => handleTitleInput(this, e as Event), true);
@@ -747,6 +794,7 @@ export default class CalloutEnhancePlugin extends Plugin {
             this.listen(document, "compositionend", (e) => guardTitleEvents(this, e), true);
             this.listen(document, "pointerdown", this.handleGlobalPointerDown, true);
             this.listen(document, "mousedown", this.handleGlobalTitleMouseDown, true);
+            this.listen(document, "mousedown", this.handleEmptyCalloutBodyMouseDown, true);
             this.listen(document.body, "click", this.handleGlobalClick, true);
             this.listen(document.body, "input", (e) => handleCompletionInput(this, e as InputEvent), true);
             this.listen(document.body, "compositionstart", () => handleCompletionCompositionStart(this), true);
@@ -821,6 +869,8 @@ export default class CalloutEnhancePlugin extends Plugin {
         this.cleanupHandlers = [];
         this.observer?.disconnect();
         this.observer = null;
+        this.lastEditingEmptyCallout?.classList.remove("callout-enhance-editing");
+        this.lastEditingEmptyCallout = null;
         // 清除所有防抖 timer
         this.titleEditDebounceTimers.forEach((timer) => clearTimeout(timer));
         this.titleEditDebounceTimers.clear();
