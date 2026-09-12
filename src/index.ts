@@ -1,7 +1,7 @@
 import { Plugin, IOperation, showMessage } from "siyuan";
 import "./index.scss";
 import { closestTitleFromTarget, focusNewBlockEditableStart, getCalloutFromEventTarget, getSelectionCallout, placeCaretAtEnd } from "./utils/dom";
-import { cleanCalloutOuterHTML, getCalloutBodyContainer, getCalloutBodyLineCount, hasCalloutBody, isCalloutSettingsPreview } from "./utils/callout";
+import { cleanCalloutOuterHTML, getCalloutBodyContainer, getCalloutBodyLineCount, hasCalloutBody, isCalloutFoldButtonHidden, isCalloutSettingsPreview, refreshCalloutEmptyState } from "./utils/callout";
 import { getParentBlockLikeSiyuan, shouldFocusCalloutTitleOnBodyArrowLeft } from "./utils/getBlock";
 import { createTransaction, getCurrentProtyle } from "./core/api";
 import {
@@ -137,6 +137,7 @@ export default class CalloutEnhancePlugin extends Plugin {
             ensureCalloutTitleEditable(titleEl);
             this.titleBoundEls.add(titleEl);
         }
+        refreshCalloutEmptyState(block);
         block.dataset.enhanced = "true";
     }
 
@@ -569,7 +570,8 @@ export default class CalloutEnhancePlugin extends Plugin {
         const pointerHit = this.readCalloutPointerHit(callout, e);
         this.lastCalloutPointerHit = pointerHit;
         const { clickX, clickY, hit } = pointerHit;
-        if ((clickX >= hit.typeMenuLeft && clickX <= hit.typeMenuRight && clickY <= hit.firstLineBandBottom) || isFoldButtonHit(hit, clickX, clickY)) {
+        const foldHidden = isCalloutFoldButtonHidden(callout);
+        if ((clickX >= hit.typeMenuLeft && clickX <= hit.typeMenuRight && clickY <= hit.firstLineBandBottom) || (!foldHidden && isFoldButtonHit(hit, clickX, clickY))) {
             e.preventDefault();
             e.stopPropagation();
         }
@@ -613,7 +615,7 @@ export default class CalloutEnhancePlugin extends Plugin {
             return;
         }
 
-        if (isFoldButtonHit(hit, clickX, clickY) && blockId) {
+        if (!isCalloutFoldButtonHidden(callout) && isFoldButtonHit(hit, clickX, clickY) && blockId) {
             e.preventDefault();
             e.stopPropagation();
             if ((e.ctrlKey || e.metaKey) && e.button === 0) {
@@ -755,6 +757,18 @@ export default class CalloutEnhancePlugin extends Plugin {
 
         this.observer = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
+                if (mutation.type === "characterData") {
+                    const target = (mutation.target as Node)?.parentElement;
+                    const callout = target?.closest?.('.callout[data-type="NodeCallout"]') as HTMLElement | null;
+                    if (callout) refreshCalloutEmptyState(callout);
+                    continue;
+                }
+                const refreshFromNode = (node: Node) => {
+                    const callout = (node.nodeType === 1
+                        ? (node as HTMLElement).closest?.('.callout[data-type="NodeCallout"]')
+                        : node.parentElement?.closest?.('.callout[data-type="NodeCallout"]')) as HTMLElement | null;
+                    if (callout) refreshCalloutEmptyState(callout);
+                };
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === 1) {
                         const el = node as HTMLElement;
@@ -767,10 +781,20 @@ export default class CalloutEnhancePlugin extends Plugin {
                         // Detect existing `[!type]` marker text in newly rendered blockquotes.
                         scanMarkerQuotes(el);
                     }
+                    refreshFromNode(node);
+                });
+                mutation.removedNodes.forEach((node) => {
+                    const target = mutation.target as Element | null;
+                    const callout = target?.closest?.('.callout[data-type="NodeCallout"]') as HTMLElement | null;
+                    if (callout) {
+                        refreshCalloutEmptyState(callout);
+                    } else if (node.nodeType === 1) {
+                        refreshFromNode(node);
+                    }
                 });
             }
         });
-        this.observer.observe(document.body, { childList: true, subtree: true });
+        this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     }
 
     onLayoutReady() {

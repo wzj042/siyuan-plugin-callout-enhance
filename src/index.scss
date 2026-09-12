@@ -360,6 +360,17 @@
         transform: translateY(-50%) rotate(0deg);
     }
 
+    /* 单行 callout（无正文且无折叠行为）不渲染折叠箭头 */
+    &[data-callout-empty="true"]:not([fold="1"]):not(.callout-enhance-fold-collapsing)>.callout-info::after {
+        content: none;
+    }
+
+    /* 非编辑态（callout 未获得焦点）隐藏占位空行，单行 callout 保持单行外观；
+       进入编辑（标题/正文获得焦点）后占位行恢复，便于点入正文。 */
+    &[data-callout-empty="true"]:not(:focus-within)>.callout-content>[data-type] {
+        display: none;
+    }
+
     /* 导出PDF的结果中隐藏折叠/展开按钮 */
     @media print {
         &>.callout-info::after {

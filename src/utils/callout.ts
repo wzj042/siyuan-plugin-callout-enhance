@@ -156,6 +156,27 @@ export function getCalloutBodyContainer(block: HTMLElement) {
     return (block.querySelector?.(".callout-content") as HTMLElement | null) || block;
 }
 
+/**
+ * 同步 callout 的「无正文」标记（data-callout-empty）：
+ * 单行 callout（标题即全部内容）据此隐藏折叠箭头，并在非编辑态隐藏占位空行。
+ */
+export function refreshCalloutEmptyState(block: HTMLElement | null) {
+    if (!block || block.dataset?.type !== "NodeCallout") return;
+    if (hasCalloutBody(block)) {
+        delete block.dataset.calloutEmpty;
+    } else {
+        block.dataset.calloutEmpty = "true";
+    }
+}
+
+/** 单行 callout（无正文且未折叠）不显示折叠箭头，点击热区一并失效。 */
+export function isCalloutFoldButtonHidden(block: HTMLElement | null) {
+    if (!block) return false;
+    return !!block.dataset?.calloutEmpty
+        && !block.getAttribute("fold")
+        && !block.classList.contains("callout-enhance-fold-collapsing");
+}
+
 export function ensureEmptyBodyPlaceholderForCallout(block: HTMLElement, getNewNodeId: () => string) {
     if (!block.classList.contains("callout")) return;
     const content = getCalloutBodyContainer(block);
